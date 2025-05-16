@@ -1764,76 +1764,135 @@ app.post("/api/student-registration-form", async (req, res) => {
   const client = await pool.connect();
   try {
     const {
-      studentName, email, contactNo, userid, role
+      studentName,
+      email,
+      contactNo,
+      userid,
+      role,
+      passoutYear,
+      batchName,
+      highestQualification,
+      skillset,
+      certification,
+      currentLocation,
+      experience,
+      trainingStatus,
+      aptitudeMarks,
+      aptitudePercentage,
+      aptitudeResult
     } = req.body;
 
-    const batchName = "No Batch";
-    const trainingStatus = "No Status";
+    // Defaults if not provided
+    const finalBatchName = batchName || "No Batch";
+    const finalTrainingStatus = trainingStatus || "No Status";
     const placementStatus = "Unplaced";
 
-    const passoutYear = "Not Defined";
-    const highestQualification = "Not Defined";
-    const skillset = "Not Defined";
-    const certification = "Not Defined";
-    const currentLocation = "Not Defined";
-    const experience = "Not Defined";
+    const finalPassoutYear = passoutYear || "Not Defined";
+    const finalHighestQualification = highestQualification || "Not Defined";
+    const finalSkillset = skillset || "Not Defined";
+    const finalCertification = certification || "Not Defined";
+    const finalCurrentLocation = currentLocation || "Not Defined";
+    const finalExperience = experience || "Not Defined";
 
     const password = generatePassword(studentName, contactNo);
     const studentId = await generateStudentId(client);
 
     // Validations
     const errors = [];
-    if (!studentName || studentName.trim().length < 3) errors.push("Full Name must be at least 3 characters.");
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push("Invalid Email format.");
-    if (!contactNo || !/^[6-9]\d{9}$/.test(contactNo)) errors.push("Contact number must be 10 digits starting with 6-9.");
+    if (!studentName || studentName.trim().length < 3)
+      errors.push("Full Name must be at least 3 characters.");
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      errors.push("Invalid Email format.");
+    if (!contactNo || !/^[6-9]\d{9}$/.test(contactNo))
+      errors.push("Contact number must be 10 digits starting with 6-9.");
 
-
-    const checkEmail = await client.query("SELECT 1 FROM student_registration WHERE email_id = $1", [email]);
+    const checkEmail = await client.query(
+      "SELECT 1 FROM student_registration WHERE email_id = $1",
+      [email]
+    );
     if (checkEmail.rows.length > 0) errors.push("Email already exists.");
 
-    if (errors.length > 0) return res.status(400).json({ message: "Validation failed", errors });
+    if (errors.length > 0)
+      return res.status(400).json({ message: "Validation failed", errors });
 
     await client.query("BEGIN");
 
-    await client.query(`
+    await client.query(
+      `
       INSERT INTO student_registration (
         id, student_name, email_id, contact_no, passout_year,
         batch_name, highest_qualification, skillset, certification,
         current_location, experience, placement_status, training_status,
         password, created_by_role, created_by_userid, created_at
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-    `, [
-      studentId, studentName, email, contactNo, passoutYear,
-      batchName, highestQualification, skillset, certification || "",
-      currentLocation, experience || null, placementStatus, trainingStatus,
-      password, req.body.role, req.body.userid, new Date()
-    ]);
-
-    await client.query(
-      `INSERT INTO student_batch_history (student_id, new_batch, old_batch, moved_at, move_reason, created_by_userid, created_by_role) 
-       VALUES ($1, $2, $3, NOW(), $4, $5, $6)`,
-      [studentId, batchName, batchName, "Newly Registered, No Batch Assigned Yet", req.body.userid, req.body.role]
+    `,
+      [
+        studentId,
+        studentName,
+        email,
+        contactNo,
+        finalPassoutYear,
+        finalBatchName,
+        finalHighestQualification,
+        finalSkillset,
+        finalCertification,
+        finalCurrentLocation,
+        finalExperience,
+        placementStatus,
+        finalTrainingStatus,
+        password,
+        role,
+        userid,
+        new Date(),
+      ]
     );
 
-    await client.query(`
+    await client.query(
+      `
+      INSERT INTO student_batch_history (
+        student_id, new_batch, old_batch, moved_at, move_reason, created_by_userid, created_by_role
+      ) VALUES ($1, $2, $3, NOW(), $4, $5, $6)
+    `,
+      [
+        studentId,
+        finalBatchName,
+        finalBatchName,
+        "Newly Registered, No Batch Assigned Yet",
+        userid,
+        role,
+      ]
+    );
+
+    await client.query(
+      `
       INSERT INTO aptitude_result (
         id, aptitude_marks, percentage, result, created_by_role, created_by_userid
       ) VALUES ($1, $2, $3, $4, $5, $6)
-    `, [
+    `,
+      [
+        studentId,
+        aptitudeMarks !== undefined && aptitudeMarks !== "" ? aptitudeMarks : null,
+        aptitudePercentage !== undefined && aptitudePercentage !== "" ? aptitudePercentage : null,
+        aptitudeResult !== undefined && aptitudeResult !== "" ? aptitudeResult : null,
+        role,
+        userid,
+      ]
+    );
+
+    await createLoginCredentials(
+      client,
       studentId,
-      req.body.aptitudeMarks !== undefined && req.body.aptitudeMarks !== '' ? req.body.aptitudeMarks : null,
-      req.body.aptitudePercentage !== undefined && req.body.aptitudePercentage !== '' ? req.body.aptitudePercentage : null,
-      req.body.aptitudeResult !== undefined && req.body.aptitudeResult !== '' ? req.body.aptitudeResult : null,
-      req.body.role, req.body.userid
-    ]);
-
-
-    await createLoginCredentials(client, studentId, studentName, email, contactNo, trainingStatus);
+      studentName,
+      email,
+      contactNo,
+      finalTrainingStatus
+    );
 
     await client.query("COMMIT");
 
-    res.status(201).json({ message: "Student successfully registered.", generatedId: studentId });
-
+    res
+      .status(201)
+      .json({ message: "Student successfully registered.", generatedId: studentId });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("Error:", err);
@@ -1846,6 +1905,7 @@ app.post("/api/student-registration-form", async (req, res) => {
 // Route for file upload
 app.post("/api/studentRegistrationExcelUpload", upload.single("file"), async (req, res) => {
   const client = await pool.connect();
+
   try {
     const workbook = xlsx.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
@@ -1853,133 +1913,132 @@ app.post("/api/studentRegistrationExcelUpload", upload.single("file"), async (re
     const data = xlsx.utils.sheet_to_json(worksheet);
     fs.unlinkSync(req.file.path);
 
-    if (!data.length) return res.status(400).send("File is empty or invalid");
+    if (!data.length) return res.status(400).json({ message: "File is empty or invalid" });
 
     const requiredFields = ["student_name", "email_id", "contact_no"];
+
     const errors = [];
     const ignored = [];
-    const validRows = [];
+    const inserted = [];
 
     await client.query("BEGIN");
 
     for (let [index, row] of data.entries()) {
       const rowNumber = index + 2;
+      const studentName = row.student_name ? String(row.student_name).trim() : "";
+      const email = row.email_id ? String(row.email_id).trim().toLowerCase() : "";
+      const contactNo = row.contact_no ? String(row.contact_no).trim() : "";
 
-      const missingFields = requiredFields.filter(f => !row[f] || row[f].toString().trim() === "");
-      if (missingFields.length > 0) {
-        errors.push(`Row ${rowNumber} - Missing: ${missingFields.join(", ")}`);
+      const passoutYear = row.passout_year ? String(row.passout_year).trim() : "Not Defined";
+      const batchName = row.batch_name ? String(row.batch_name).trim() : "No Batch";
+      const highestQualification = row.highest_qualification ? String(row.highest_qualification).trim() : "Not Defined";
+      const skillset = row.skillset ? String(row.skillset).trim() : "Not Defined";
+      const certification = row.certification ? String(row.certification).trim() : "Not Defined";
+      const currentLocation = row.current_location ? String(row.current_location).trim() : "Not Defined";
+      const experience = row.experience ? String(row.experience).trim() : "Not Defined";
+      const trainingStatus = row.training_status ? String(row.training_status).trim() : "No Status";
+      const aptitudeMarks = row.aptitude_marks && !isNaN(row.aptitude_marks) ? Number(row.aptitude_marks) : null;
+      const aptitudePercentage = row.percentage && !isNaN(row.percentage) ? Number(row.percentage) : null;
+      const aptitudeResult = row.result ? String(row.result).trim() : "Not Defined";
+      const placementStatus = "Unplaced"; // static default
+
+      // Basic validations
+      if (!studentName || studentName.length < 3 || studentName.length > 100) {
+        errors.push(`Row ${rowNumber}: Student name must be between 3-100 characters.`);
         continue;
       }
 
-      // Email validation
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email_id)) {
-        errors.push(`Row ${rowNumber} - Invalid email: ${row.email_id}`);
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errors.push(`Row ${rowNumber}: Invalid email: ${email}`);
         continue;
       }
 
-      // Contact number validation
-      if (!/^[6-9]\d{9}$/.test(row.contact_no)) {
-        errors.push(`Row ${rowNumber} - Invalid contact number: ${row.contact_no}`);
+      if (!contactNo || !/^[6-9]\d{9}$/.test(contactNo)) {
+        errors.push(`Row ${rowNumber}: Invalid contact number: ${contactNo}`);
         continue;
       }
 
-      // Student name validation
-      if (row.student_name.trim().length < 3 || row.student_name.trim().length > 100) {
-        errors.push(`Row ${rowNumber} - Student name must be between 3 and 100 characters.`);
-        continue;
-      }
-
-      // Skip if already exists
-      const existing = await client.query("SELECT id FROM student_registration WHERE email_id = $1", [row.email_id]);
+      // Check if email already exists
+      const existing = await client.query("SELECT id FROM student_registration WHERE email_id = $1", [row.email_id.trim().toLowerCase()]);
       if (existing.rows.length > 0) {
         ignored.push(`Row ${rowNumber} - Email already registered: ${row.email_id}`);
         continue;
       }
 
+      // New student
       const studentId = await generateStudentId(client);
-      const password = generatePassword(row.student_name, row.contact_no);
+      const password = generatePassword(studentName, contactNo);
 
-      validRows.push({
-        id: studentId,
-        student_name: row.student_name.trim(),
-        email_id: String(row.email_id).trim().toLowerCase(),
-        contact_no: String(row.contact_no).trim(),
-        passout_year: "Not Defined",
-        highest_qualification: "Not Defined",
-        skillset: "Not Defined",
-        certification: "Not Defined",
-        current_location: "Not Defined",
-        experience: "Not Defined",
-        placement_status: "Unplaced",
-        training_status: "No Status",
-        batch_name: "No Batch",
-        password,
-      });
-    }
+      // Insert new record
+      await client.query(
+        `INSERT INTO student_registration (
+          id, student_name, email_id, contact_no, passout_year, batch_name,
+          highest_qualification, skillset, certification, current_location, experience,
+          placement_status, training_status, password, created_by_role, created_by_userid, created_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+          $12, $13, $14, $15, $16, NOW()
+        )`,
+        [
+          studentId, studentName, email, contactNo, passoutYear, batchName,
+          highestQualification, skillset, certification, currentLocation, experience,
+          placementStatus, trainingStatus, password, req.body.role, req.body.userid
+        ]
+      );
 
-    if (validRows.length === 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ message: "No new students to register", errors, ignored });
-    }
-
-    for (const row of validRows) {
-      await client.query(`
-        INSERT INTO student_registration (
-          id, student_name, email_id, contact_no, passout_year,
-          batch_name, highest_qualification, skillset, certification,
-          current_location, experience, placement_status, training_status, password,
-          created_by_role, created_by_userid, created_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16, $17)
-      `, [
-        row.id, row.student_name, row.email_id, row.contact_no, row.passout_year,
-        row.batch_name, row.highest_qualification, row.skillset, row.certification,
-        row.current_location, row.experience, row.placement_status,
-        row.training_status, row.password, req.body.role, req.body.userid, new Date()
-      ]);
-
-      await client.query(`
-        INSERT INTO student_batch_history (student_id, new_batch, old_batch, moved_at, move_reason, created_by_role, created_by_userid )
-        VALUES ($1, $2, $3, NOW(), $4, $5, $6)
-      `, [
-        row.id, row.batch_name, "No Batch", "Newly Registered, No Batch Assigned Yet", req.body.role, req.body.userId
-      ]);
-
-      await client.query(`
-        INSERT INTO aptitude_result (
+      await client.query(
+        `INSERT INTO aptitude_result (
           id, aptitude_marks, percentage, result, created_by_role, created_by_userid
-        ) VALUES ($1, $2, $3, $4, $5, $6)
-      `, [
-        row.id,
-        row.aptitude_marks && !isNaN(row.aptitude_marks) ? Number(row.aptitude_marks) : null,
-        row.percentage && !isNaN(row.percentage) ? Number(row.percentage) : null,
-        row.result || 'Not Defined',
-        req.body.role,
-        req.body.userid
-      ]);
+        ) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          studentId, aptitudeMarks, aptitudePercentage, aptitudeResult,
+          req.body.role, req.body.userid
+        ]
+      );
 
+      await client.query(
+        `INSERT INTO student_batch_history (
+          student_id, new_batch, old_batch, moved_at, move_reason, created_by_role, created_by_userid
+        ) VALUES (
+          $1, $2, $3, NOW(), $4, $5, $6
+        )`,
+        [
+          studentId, batchName, "No Batch",
+          "Newly Registered, No Batch Assigned Yet", req.body.role, req.body.userid
+        ]
+      );
 
-      await createLoginCredentials(client, row.id, row.student_name, row.email_id, row.contact_no, row.training_status);
+      await createLoginCredentials(
+        client,
+        studentId,
+        studentName,
+        email,
+        contactNo,
+        trainingStatus
+      );
+
+      inserted.push(`Row ${rowNumber}: Registered ${email}`);
     }
 
     await client.query("COMMIT");
 
-    res.status(200).json({
-      message: "Upload completed",
-      inserted: validRows.length,
-      ignored,
-      errors
+    return res.status(200).json({
+      message: "Excel upload complete",
+      inserted: inserted.length,
+      ignoredCount: ignored.length,
+      insertedDetails: inserted,
+      ignoredDetails: ignored,
+      errorDetails: errors
     });
 
-  } catch (error) {
+  } catch (err) {
     await client.query("ROLLBACK");
-    console.error("Bulk upload error:", error);
-    res.status(500).send("Internal Server Error");
+    console.error("Excel upload error:", err);
+    res.status(500).json({ message: "Internal server error during Excel upload." });
   } finally {
     client.release();
   }
 });
-
-
 
 // Route to update student's batch
 app.put("/api/moveStudent/:id", async (req, res) => {
@@ -5102,8 +5161,6 @@ app.get("/api/intern/evaluation-result", async (req, res) => {
   }
 });
 
-
-
 app.get('/api/getTrackByBatch', async (req, res) => {
   const { batchName } = req.query;
 
@@ -5122,13 +5179,6 @@ app.get('/api/getTrackByBatch', async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
-
-// app.get("*", (req, res) => {
-//   res.sendFile(
-//     path.join(__dirname, "../valuedx_training_app/build", "index.html")
-//   );
-// });
 
 app.listen(port, () => {
   console.log(`Server app listening at http://localhost:${port}`);
